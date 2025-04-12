@@ -49,8 +49,9 @@ def parse_line(line):
     if not line.startswith("+"):
         return None
     parts = line[1:].strip().split()
-    if len(parts) >= 3:
-        name, x, y = parts[0], parts[1], parts[2]
+    if len(parts) >= 5:
+        name = " ".join(parts[:-4])  # Everything before the last 4 values
+        x, y = parts[-4], parts[-3]
         return ET.Element("Marker", Name=name, X=x, Y=y, Icon="shipwright", Facet="0")
     return None
 
@@ -70,22 +71,21 @@ def update_dockmasters():
 
     print(f"✅ Parsed {len(markers)} markers.")
 
+    # Build XML
     pack = ET.Element("Pack", Name="GG DOCKMASTERS", Revision="0")
     for marker in markers:
         pack.append(marker)
 
     rough_string = ET.tostring(pack, encoding="utf-8")
     reparsed = xml.dom.minidom.parseString(rough_string)
-    pretty_xml = reparsed.toprettyxml(indent="  ")
+    pretty_xml = reparsed.toprettyxml(indent="  ", encoding="UTF-8")
 
+    # Detect install path
     client_path = search_for_game_folder()
-
-    # If not found, prompt GUI
     if not client_path:
         print("⚠️ Could not auto-detect Ultima Online installation.")
         client_path = prompt_user_for_folder()
 
-    # Validate and set full XML output path
     if not client_path or not client_path.exists():
         print("❌ No valid folder selected. Exiting.")
         return
@@ -93,11 +93,15 @@ def update_dockmasters():
     xml_path = client_path / "GG_Dockmasters.xml"
     os.makedirs(xml_path.parent, exist_ok=True)
 
+    # Write with BOM and CRLF
     print(f"💾 Writing to {xml_path}")
-    with open(xml_path, "w", encoding="utf-8") as f:
-        f.write(pretty_xml)
+    try:
+        with open(xml_path, "wb") as f:
+            f.write(pretty_xml.replace(b"\n", b"\r\n"))
+        print("🎉 GG_Dockmasters.xml successfully updated.")
+    except Exception as e:
+        print(f"❌ Failed to write XML: {e}")
 
-    print("🎉 GG_Dockmasters.xml successfully updated.")
 
 if __name__ == "__main__":
     if not is_admin():
