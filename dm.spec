@@ -5,7 +5,7 @@ a = Analysis(
     ['dm.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('original_icons.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
