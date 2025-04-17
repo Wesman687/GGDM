@@ -1,4 +1,4 @@
-
+import asyncio
 import os
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
@@ -7,12 +7,30 @@ from pathlib import Path
 import ctypes
 import sys
 from tkinter import filedialog, Tk
-import os
-
 
 # Constants
-GITHUB_RAW_URL = "https://raw.githubusercontent.com/LeoPiro/GG_Dms/main/GG%20DOCKMASTERS.txt"
-RELATIVE_XML_PATH = r"ClassicUO\\Data\\Client\\GG_Dockmasters.xml"
+GITHUB_BASE_URL = "https://raw.githubusercontent.com/LeoPiro/GG_Dms/main/"
+FILES_TO_DOWNLOAD = [
+    {
+        "filename": "GG DOCKMASTERS.txt",
+        "output_xml": "GG_Dockmasters.xml",
+        "pack_name": "GG DOCKMASTERS",
+        "icon": "shipwright"
+    },
+    {
+        "filename": "PUBLIC DOCKMASTERS.txt",
+        "output_xml": "Public_Dockmasters.xml",
+        "pack_name": "Public DOCKMASTERS",
+        "icon": "shipwright"
+    },
+    {
+        "filename": "TREASURE.txt",
+        "output_xml": "Treasure_Map_Locations.xml",
+        "pack_name": "Treasure Map Locations",
+        "icon": "landmark"
+    },
+]
+
 DEFAULT_INSTALL_PATH = r"C:\\Program Files (x86)\\Ultima Online Outlands"
 
 def search_for_game_folder():
@@ -38,49 +56,23 @@ def prompt_user_for_folder():
     path = filedialog.askdirectory(title="Select the 'Client' folder inside Ultima Online Outlands")
     return Path(path) if path else None
 
-
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
     except:
         return False
 
-def parse_line(line):
+def parse_line(line, icon):
     if not line.startswith("+"):
         return None
     parts = line[1:].strip().split()
     if len(parts) >= 5:
         name = " ".join(parts[:-4])  # Everything before the last 4 values
         x, y = parts[-4], parts[-3]
-        return ET.Element("Marker", Name=name, X=x, Y=y, Icon="shipwright", Facet="0")
+        return ET.Element("Marker", Name=name, X=x, Y=y, Icon=icon, Facet="0")
     return None
 
-def update_dockmasters():
-    print("🌐 Fetching from GitHub...")
-    response = requests.get(GITHUB_RAW_URL)
-    if response.status_code != 200:
-        print(f"❌ Failed to download file: HTTP {response.status_code}")
-        return
-
-    lines = response.text.strip().splitlines()
-    markers = []
-    for line in lines:
-        marker = parse_line(line)
-        if marker is not None:
-            markers.append(marker)
-
-    print(f"✅ Parsed {len(markers)} markers.")
-
-    # Build XML
-    pack = ET.Element("Pack", Name="GG DOCKMASTERS", Revision="0")
-    for marker in markers:
-        pack.append(marker)
-
-    rough_string = ET.tostring(pack, encoding="utf-8")
-    reparsed = xml.dom.minidom.parseString(rough_string)
-    pretty_xml = reparsed.toprettyxml(indent="  ", encoding="UTF-8")
-
-    # Detect install path
+def update_markers():
     client_path = search_for_game_folder()
     if not client_path:
         print("⚠️ Could not auto-detect Ultima Online installation.")
@@ -90,17 +82,44 @@ def update_dockmasters():
         print("❌ No valid folder selected. Exiting.")
         return
 
-    xml_path = client_path / "GG_Dockmasters.xml"
-    os.makedirs(xml_path.parent, exist_ok=True)
+    for file_info in FILES_TO_DOWNLOAD:
+        full_url = GITHUB_BASE_URL + file_info["filename"].replace(" ", "%20")  # Encode spaces
+        print(f"🌐 Fetching {file_info['filename']} from GitHub...")
 
-    # Write with BOM and CRLF
-    print(f"💾 Writing to {xml_path}")
-    try:
-        with open(xml_path, "wb") as f:
-            f.write(pretty_xml.replace(b"\n", b"\r\n"))
-        print("🎉 GG_Dockmasters.xml successfully updated.")
-    except Exception as e:
-        print(f"❌ Failed to write XML: {e}")
+        response = requests.get(full_url)
+        if response.status_code != 200:
+            print(f"❌ Failed to download {file_info['filename']}: HTTP {response.status_code}")
+            continue
+
+        lines = response.text.strip().splitlines()
+        markers = []
+        for line in lines:
+            marker = parse_line(line, file_info["icon"])
+            if marker is not None:
+                markers.append(marker)
+
+        print(f"✅ Parsed {len(markers)} markers from {file_info['filename']}.")
+
+        # Build XML
+        pack = ET.Element("Pack", Name=file_info["pack_name"], Revision="0")
+        for marker in markers:
+            pack.append(marker)
+
+        rough_string = ET.tostring(pack, encoding="utf-8")
+        reparsed = xml.dom.minidom.parseString(rough_string)
+        pretty_xml = reparsed.toprettyxml(indent="  ", encoding="UTF-8")
+
+        # Write XML
+        xml_path = client_path / file_info["output_xml"]
+        os.makedirs(xml_path.parent, exist_ok=True)
+
+        print(f"💾 Writing {file_info['output_xml']}")
+        try:
+            with open(xml_path, "wb") as f:
+                f.write(pretty_xml.replace(b"\n", b"\r\n"))
+            print(f"🎉 {file_info['output_xml']} successfully updated.")
+        except Exception as e:
+            print(f"❌ Failed to write {file_info['output_xml']}: {e}")
 
 
 if __name__ == "__main__":
@@ -108,4 +127,5 @@ if __name__ == "__main__":
         print("🛡️ Restarting with admin privileges...")
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
     else:
-        update_dockmasters()
+        update_markers()
+        input("\n✅ Script finished. Press Enter to exit...")
