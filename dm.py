@@ -16,8 +16,8 @@ def get_resource_path(filename):
     return os.path.join(os.path.abspath("."), filename)
 
 
-TREASURE_COLOR = "purple"
-DOCKMASTER_COLOR = "blue"
+TREASURE_COLOR = "#FF33CC"
+DOCKMASTER_COLOR = "#00FFFF"
 
 # Constants
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/LeoPiro/GG_Dms/main/"
