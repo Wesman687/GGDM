@@ -5,7 +5,7 @@ a = Analysis(
     ['dm.py'],
     pathex=[],
     binaries=[],
-    datas=[('original_icons.json', '.')],
+    datas=[('DejaVuSans-Bold.ttf', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

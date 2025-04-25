@@ -1,5 +1,6 @@
 import os
 import re
+import traceback
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 import requests
@@ -9,13 +10,11 @@ import sys
 from tkinter import filedialog, Tk
 from PIL import Image, ImageDraw, ImageFont
 
-try:
-    top_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
-    bottom_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-except IOError:
-    print("⚠️ Couldn't load TTF font. Falling back to default.")
-    top_font = ImageFont.load_default()
-    bottom_font = ImageFont.load_default()
+def get_resource_path(filename):
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, filename)
+    return os.path.join(os.path.abspath("."), filename)
+
 
 TREASURE_COLOR = "purple"
 DOCKMASTER_COLOR = "blue"
@@ -67,7 +66,7 @@ def is_dockmaster_marker(name):
         re.match(r"^PUB[-]?(X\d+|\d+)$", name)   # e.g., PUB-X3, PUB9
     )
 
-def create_marker_icon(name, output_dir):
+def create_marker_icon(name, output_dir, top_font, bottom_font):
     top_text, bottom_text = split_name(name)
 
     if is_treasure_marker(name):
@@ -81,14 +80,6 @@ def create_marker_icon(name, output_dir):
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
-    # Font sizes
-    try:
-        top_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
-        bottom_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
-    except IOError:
-        top_font = ImageFont.load_default()
-        bottom_font = ImageFont.load_default()
-
     # Measure text
     top_bbox = draw.textbbox((0, 0), top_text, font=top_font)
     top_width, top_height = top_bbox[2] - top_bbox[0], top_bbox[3] - top_bbox[1]
@@ -96,14 +87,14 @@ def create_marker_icon(name, output_dir):
     top_y = 2
 
     bottom_bbox = draw.textbbox((0, 0), bottom_text, font=bottom_font)
-    bottom_width, bottom_height = bottom_bbox[2] - bottom_bbox[0], bottom_bbox[3] - bottom_bbox[1]
+    bottom_width = bottom_bbox[2] - bottom_bbox[0]
     bottom_x = (width - bottom_width) // 2
 
     # Add fixed space between top and bottom
     spacing = 4
     bottom_y = top_y + top_height + spacing
 
-    # Outlines
+    # Draw outline
     for x_off in [-1, 0, 1]:
         for y_off in [-1, 0, 1]:
             if x_off or y_off:
@@ -116,6 +107,7 @@ def create_marker_icon(name, output_dir):
 
     os.makedirs(output_dir, exist_ok=True)
     canvas.save(os.path.join(output_dir, f"{name}.png"))
+
 
 
 def split_dockmaster_name(name):
@@ -137,22 +129,49 @@ def split_dockmaster_name(name):
     return name.upper(), ""  # fallback for names like "GH" or "Gym"
 
 
-def search_for_game_folder():
+import concurrent.futures
+
+def search_for_game_folders():
+    """Fast search for all Ultima Online folders across multiple roots."""
     search_roots = [
         os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
         os.environ.get("ProgramW6432", r"C:\Program Files"),
         r"C:\Games",
         os.path.join(os.environ.get("USERPROFILE", ""), "AppData", "Local"),
+        os.environ.get("PROGRAMDATA", r"C:\ProgramData"),  # Fixed
         os.path.join(os.environ.get("USERPROFILE", ""), "Documents"),
     ]
+
     target_ending = os.path.join("ClassicUO", "Data", "Client")
+    found = []
 
-    for root in search_roots:
+    def walk_root(root):
+        local_found = []
+        if not root or not os.path.exists(root):
+            return local_found
+
         for dirpath, dirnames, filenames in os.walk(root):
-            if dirpath.endswith(target_ending):
-                return Path(dirpath)
+            # ✅ Limit how deep we search (e.g. max 5 levels deep)
+            if dirpath.count(os.sep) - root.count(os.sep) > 4:
+                # prevent going deeper by clearing dirnames
+                dirnames[:] = []
+                continue
 
-    return None
+            if dirpath.lower().endswith(target_ending.lower()):
+                found.append(Path(dirpath))
+        return local_found
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        futures = [executor.submit(walk_root, root) for root in search_roots]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                found.extend(result)
+            except Exception as e:
+                print(f"⚠️ Error searching: {e}")
+
+    return found
+
 
 def get_resource_path(relative_path):
     """ Get the absolute path to a resource, works for dev and for PyInstaller bundled exe """
@@ -206,18 +225,42 @@ def parse_line(line, default_icon):
 
         return ET.Element("Marker", Name=name, X=x, Y=y, Icon=icon, Facet="0")
     return None
-def ensure_icon_exists(icon_name, output_folder):
-    # Only generate icons for treasures or dockmasters
+
+def ensure_icon_exists(icon_name, output_folder, top_font, bottom_font):
     if is_treasure_marker(icon_name) or is_dockmaster_marker(icon_name):
-        create_marker_icon(icon_name, output_folder)
+        create_marker_icon(icon_name, output_folder, top_font, bottom_font)
             
 
 def update_markers():
-    client_path = search_for_game_folder()
+    try:
+        font_path = get_resource_path("DejaVuSans-Bold.ttf")
+        top_font = ImageFont.truetype(font_path, 12)
+        bottom_font = ImageFont.truetype(font_path, 16)
+    except IOError:
+        print("⚠️ Couldn't load embedded TTF font, using default.")
+        top_font = ImageFont.load_default()
+        bottom_font = ImageFont.load_default()
+        
+    client_paths = search_for_game_folders()
     mapicons_path = Path(r"C:\Program Files (x86)\Ultima Online Outlands\ClassicUO\Data\Client\MapIcons")
-    if not client_path:
-        print("⚠️ Could not auto-detect Ultima Online installation.")
+    if not client_paths:
+        print("⚠️ Could not auto-detect any Ultima Online installations.")
         client_path = prompt_user_for_folder()
+    elif len(client_paths) == 1:
+        client_path = client_paths[0]
+    else:
+        print("🔍 Multiple Ultima Online installations found:")
+        for idx, path in enumerate(client_paths):
+            print(f"  [{idx+1}] {path}")
+
+        while True:
+            choice = input("\nPlease select which installation to update (1 - {}): ".format(len(client_paths)))
+            if choice.isdigit():
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(client_paths):
+                    client_path = client_paths[choice_idx]
+                    break
+            print("⚠️ Invalid choice. Try again.")
 
     if not client_path or not client_path.exists():
         print("❌ No valid folder selected. Exiting.")
@@ -240,7 +283,7 @@ def update_markers():
             marker = parse_line(line, selected_icon)
             if marker is not None:
                 icon_name = marker.attrib.get("Icon")
-                ensure_icon_exists(icon_name, mapicons_path)
+                ensure_icon_exists(icon_name, mapicons_path, top_font, bottom_font)
                 markers.append(marker)
 
         markers.sort(key=custom_sort)
@@ -269,9 +312,24 @@ def update_markers():
 
 
 if __name__ == "__main__":
-    if not is_admin():
-        print("🛡️ Restarting with admin privileges...")
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
-    else:
+    try:
+        if not is_admin():
+            print("🛡️ Restarting with admin privileges...")
+
+            if getattr(sys, 'frozen', False):  # Running as bundled EXE
+                exe_path = sys.executable
+                params = ""
+            else:  # Running as .py
+                exe_path = sys.executable
+                params = f'"{os.path.abspath(__file__)}"'
+
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", exe_path, params, None, 1)
+            sys.exit()
+
+        # 🧠 Now *only* the elevated process actually runs the updater
         update_markers()
-        input("\n✅ Script finished. Press Enter to exit...")
+
+    except Exception as e:
+        print("\n❌ An unexpected error occurred:")
+        traceback.print_exc()
+        
