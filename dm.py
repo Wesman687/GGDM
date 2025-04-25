@@ -1,6 +1,5 @@
-import asyncio
-import json
 import os
+import re
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 import requests
@@ -8,6 +7,18 @@ from pathlib import Path
 import ctypes
 import sys
 from tkinter import filedialog, Tk
+from PIL import Image, ImageDraw, ImageFont
+
+try:
+    top_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
+    bottom_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+except IOError:
+    print("⚠️ Couldn't load TTF font. Falling back to default.")
+    top_font = ImageFont.load_default()
+    bottom_font = ImageFont.load_default()
+
+TREASURE_COLOR = "purple"
+DOCKMASTER_COLOR = "blue"
 
 # Constants
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/LeoPiro/GG_Dms/main/"
@@ -34,75 +45,96 @@ FILES_TO_DOWNLOAD = [
 
 DEFAULT_INSTALL_PATH = r"C:\\Program Files (x86)\\Ultima Online Outlands"
 
-# Your known original Outlands standard icons
-TOP_ICONS = [
-    "shipwright", "landmark", "treasurechest", "bank", "moongate",
-    "vendor", "citygate", "shrine", "stable", "dungeon",
-    "blacksmith", "healer", "tavern", "dock", "house",
-    "arena", "church", "guildhall", "mine", "portal"
-]
 
-def list_available_icons(mapicons_path):
-    icons = []
-    for file in os.listdir(mapicons_path):
-        if file.lower().endswith(".png"):
-            icon_name = os.path.splitext(file)[0]
-            icons.append(icon_name)
-    return sorted(icons)
+def split_name(name):
+    if '-' in name:
+        top, bottom = name.split('-', 1)
+        return top.strip().upper(), bottom.strip().upper()
+    match = re.match(r"^([A-Z]+)(\d+)$", name, re.IGNORECASE)
+    if match:
+        return match.group(1).upper(), match.group(2)
+    return name.upper(), ""
 
-    
-def detect_custom_icons(mapicons_path):
-    # Load original icons list
+def is_treasure_marker(name):
+    return re.match(r"^(N|E|S|W|CC|X)\d+$", name.upper())
+
+def is_dockmaster_marker(name):
+    name = name.upper()
+    return (
+        re.match(r"^\d+[A-Z]-[NESW]$", name) or  # e.g., 1A-W
+        re.match(r"^XD\d+$", name) or           # e.g., XD13
+        re.match(r"^XP\d+$", name) or           # e.g., XP2
+        re.match(r"^PUB[-]?(X\d+|\d+)$", name)   # e.g., PUB-X3, PUB9
+    )
+
+def create_marker_icon(name, output_dir):
+    top_text, bottom_text = split_name(name)
+
+    if is_treasure_marker(name):
+        color = TREASURE_COLOR
+    elif is_dockmaster_marker(name):
+        color = DOCKMASTER_COLOR
+    else:
+        color = "gray"
+
+    width, height = 54, 54
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    # Font sizes
     try:
-        with open(get_resource_path("original_icons.json"), "r") as f:
-            original_icons = set(json.load(f))
-    except Exception as e:
-        print(f"⚠️ Failed to load original_icons.json: {e}")
-        return []
+        top_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
+        bottom_font = ImageFont.truetype("DejaVuSans-Bold.ttf", 16)
+    except IOError:
+        top_font = ImageFont.load_default()
+        bottom_font = ImageFont.load_default()
 
-    # Scan current icons
-    all_icons = list_available_icons(mapicons_path)
+    # Measure text
+    top_bbox = draw.textbbox((0, 0), top_text, font=top_font)
+    top_width, top_height = top_bbox[2] - top_bbox[0], top_bbox[3] - top_bbox[1]
+    top_x = (width - top_width) // 2
+    top_y = 2
 
-    # Detect truly new icons
-    custom_icons = [icon for icon in all_icons if icon not in original_icons]
-    return sorted(custom_icons)
+    bottom_bbox = draw.textbbox((0, 0), bottom_text, font=bottom_font)
+    bottom_width, bottom_height = bottom_bbox[2] - bottom_bbox[0], bottom_bbox[3] - bottom_bbox[1]
+    bottom_x = (width - bottom_width) // 2
 
-def prompt_icon_selection(file_display_name, icon_choices, default_icon, file_name):
-    print(f"\n🌟 Choose an icon for {file_display_name}")
-    print(f"(Press Enter to use default: '{default_icon}')")
-    print(f"(Or type a custom icon name manually)")
+    # Add fixed space between top and bottom
+    spacing = 4
+    bottom_y = top_y + top_height + spacing
 
-    page_size = 20
-    total = len(icon_choices)
-    current_index = 0
+    # Outlines
+    for x_off in [-1, 0, 1]:
+        for y_off in [-1, 0, 1]:
+            if x_off or y_off:
+                draw.text((top_x + x_off, top_y + y_off), top_text, font=top_font, fill="black")
+                draw.text((bottom_x + x_off, bottom_y + y_off), bottom_text, font=bottom_font, fill="black")
 
-    while True:
-        print()
-        print_icons_in_columns(icon_choices[current_index:current_index+page_size], start_index=current_index)
-        
-        choice = input(f"Select an icon number for {file_name}, custom name, or press Enter to show more: ").strip()
+    # Draw main text
+    draw.text((top_x, top_y), top_text, font=top_font, fill=color)
+    draw.text((bottom_x, bottom_y), bottom_text, font=bottom_font, fill=color)
 
-        if choice == "":
-            current_index += page_size
-            if current_index >= total:
-                print("\n🚀 You've reached the end of the list. Showing all icons again.")
-                current_index = 0
-        else:
-            try:
-                idx = int(choice) - 1
-                if 0 <= idx < total:
-                    return icon_choices[idx]
-            except ValueError:
-                # Assume user typed custom name
-                return choice
-            print(f"⚠️ Invalid input. Please try again.")
+    os.makedirs(output_dir, exist_ok=True)
+    canvas.save(os.path.join(output_dir, f"{name}.png"))
 
-def print_icons_in_columns(icon_choices, columns=4, start_index=0):
-    for offset, icon_name in enumerate(icon_choices, start=start_index+1):
-        print(f"[{offset:<3}] {icon_name:<15}", end=' ')
-        if (offset) % columns == 0:
-            print()
-    print()
+
+def split_dockmaster_name(name):
+    """
+    Splits a name like '1A-W' into ('1A', 'W') or 'XD10' into ('XD', '10').
+    Returns a tuple: (top_text, bottom_text)
+    """
+    # Handle hyphenated names like '1A-W'
+    if '-' in name:
+        top, bottom = name.split('-', 1)
+        return top.strip().upper(), bottom.strip().upper()
+    
+    # Handle non-hyphen dockmasters like 'XD13' or 'XP2'
+    match = re.match(r"^([A-Z]+)(\d+)$", name, re.IGNORECASE)
+    if match:
+        top, bottom = match.groups()
+        return top.upper(), bottom
+
+    return name.upper(), ""  # fallback for names like "GH" or "Gym"
 
 
 def search_for_game_folder():
@@ -141,28 +173,48 @@ def is_admin():
     except:
         return False
     
-def ask_use_defaults():
-    print("\n🔵 Do you want to use the default icons?")
-    print("    [1] Yes (Recommended)")
-    print("    [2] No, I want to choose icons manually")
-    choice = input("Select 1 or 2: ").strip()
-    return choice != "2"  # Return True if user picks default
+def custom_sort(marker):
+    name = marker.attrib.get('Name', '').upper()
 
-def parse_line(line, icon):
+    match = re.match(r"^(N|E|S|W|CC|X)(\d+)$", name)
+    dock_match = re.match(r"^(XD|XP|PUB-X)(\d+)$", name)
+
+    if match:
+        prefix, number = match.groups()
+        return (0, prefix, int(number))
+
+    elif dock_match:
+        prefix, number = dock_match.groups()
+        return (0, prefix, int(number))
+
+    else:
+        return (1, name)
+    
+
+def parse_line(line, default_icon):
     if not line.startswith("+"):
         return None
     parts = line[1:].strip().split()
     if len(parts) >= 5:
-        name = " ".join(parts[:-4])  # Everything before the last 4 values
+        name = " ".join(parts[:-4])
         x, y = parts[-4], parts[-3]
+
+        if is_treasure_marker(name) or is_dockmaster_marker(name):
+            icon = name  # use marker name
+        else:
+            icon = default_icon  # fallback to default (e.g., 'shipwright')
+
         return ET.Element("Marker", Name=name, X=x, Y=y, Icon=icon, Facet="0")
     return None
+def ensure_icon_exists(icon_name, output_folder):
+    # Only generate icons for treasures or dockmasters
+    if is_treasure_marker(icon_name) or is_dockmaster_marker(icon_name):
+        create_marker_icon(icon_name, output_folder)
+            
 
 def update_markers():
     client_path = search_for_game_folder()
-    use_defaults = ask_use_defaults()
     mapicons_path = Path(r"C:\Program Files (x86)\Ultima Online Outlands\ClassicUO\Data\Client\MapIcons")
-    custom_icons = detect_custom_icons(mapicons_path)
     if not client_path:
         print("⚠️ Could not auto-detect Ultima Online installation.")
         client_path = prompt_user_for_folder()
@@ -172,26 +224,9 @@ def update_markers():
         return
 
     for file_info in FILES_TO_DOWNLOAD:
-        if use_defaults:
-            selected_icon = file_info["icon"]
-        else:
-            # Use custom icons if available, otherwise fallback to original icons
-            if custom_icons:
-                icon_choices = custom_icons
-            else:
-                # Load original icons.json
-                try:
-                    with open("original_icons.json", "r") as f:
-                        icon_choices = json.load(f)
-                except Exception as e:
-                    print(f"⚠️ Failed to load original_icons.json: {e}")
-                    icon_choices = TOP_ICONS  # fallback emergency
-
-            selected_icon = prompt_icon_selection(file_info["pack_name"], icon_choices, file_info["icon"], file_info['filename'])
-            
-        full_url = GITHUB_BASE_URL + file_info["filename"].replace(" ", "%20")  # Encode spaces
+        selected_icon = file_info["icon"]            
+        full_url = GITHUB_BASE_URL + file_info["filename"].replace(" ", "%20")
         print(f"🌐 Fetching {file_info['filename']} from GitHub...")
-
         response = requests.get(full_url)
         if response.status_code != 200:
             print(f"❌ Failed to download {file_info['filename']}: HTTP {response.status_code}")
@@ -199,11 +234,16 @@ def update_markers():
 
         lines = response.text.strip().splitlines()
         markers = []
+
+        # ⬇️ FIX: Move this block INTO the file loop
         for line in lines:
             marker = parse_line(line, selected_icon)
             if marker is not None:
+                icon_name = marker.attrib.get("Icon")
+                ensure_icon_exists(icon_name, mapicons_path)
                 markers.append(marker)
 
+        markers.sort(key=custom_sort)
         print(f"✅ Parsed {len(markers)} markers from {file_info['filename']}.")
 
         # Build XML

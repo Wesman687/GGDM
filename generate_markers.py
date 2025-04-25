@@ -24,7 +24,7 @@ except IOError:
 batch_definitions = {
     "N": 75,
     "E": 58,
-    "S": 27,
+    "S": 48,
     "W": 108,
     "CC": 19,
     "X": 75,
