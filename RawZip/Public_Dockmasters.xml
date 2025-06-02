@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Pack Name="Public DOCKMASTERS" Revision="0">
+  <Marker Name="PUB-X1" X="3235" Y="190" Icon="PUB-X1" Facet="0"/>
+  <Marker Name="PUB-X2" X="4308" Y="108" Icon="PUB-X2" Facet="0"/>
+  <Marker Name="PUB-X3" X="4057" Y="1398" Icon="PUB-X3" Facet="0"/>
+  <Marker Name="PUB-X4" X="3388" Y="919" Icon="PUB-X4" Facet="0"/>
+  <Marker Name="PUB1" X="2183" Y="813" Icon="PUB1" Facet="0"/>
+  <Marker Name="PUB10" X="1640" Y="2564" Icon="PUB10" Facet="0"/>
+  <Marker Name="PUB11" X="1934" Y="3082" Icon="PUB11" Facet="0"/>
+  <Marker Name="PUB12" X="1945" Y="2884" Icon="PUB12" Facet="0"/>
+  <Marker Name="PUB13" X="650" Y="1515" Icon="PUB13" Facet="0"/>
+  <Marker Name="PUB14" X="689" Y="1460" Icon="PUB14" Facet="0"/>
+  <Marker Name="PUB15" X="1032" Y="1156" Icon="PUB15" Facet="0"/>
+  <Marker Name="PUB17" X="2307" Y="462" Icon="PUB17" Facet="0"/>
+  <Marker Name="PUB2" X="2264" Y="616" Icon="PUB2" Facet="0"/>
+  <Marker Name="PUB3" X="2017" Y="1658" Icon="PUB3" Facet="0"/>
+  <Marker Name="PUB4" X="2045" Y="2208" Icon="PUB4" Facet="0"/>
+  <Marker Name="PUB5" X="2040" Y="2180" Icon="PUB5" Facet="0"/>
+  <Marker Name="PUB6" X="2002" Y="1870" Icon="PUB6" Facet="0"/>
+  <Marker Name="PUB7" X="3115" Y="530" Icon="PUB7" Facet="0"/>
+  <Marker Name="PUB8" X="2816" Y="564" Icon="PUB8" Facet="0"/>
+  <Marker Name="PUB9" X="2816" Y="564" Icon="PUB9" Facet="0"/>
+</Pack>
