@@ -1,5 +1,7 @@
+from logging import root
 import os
 import re
+import string
 import traceback
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
@@ -110,6 +112,30 @@ def create_marker_icon(name, output_dir, top_font, bottom_font):
 
 
 
+def get_all_windows_drives():
+    """Returns a list of all available drive letters on Windows, like ['C:\\', 'D:\\']"""
+    drives = []
+    bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+    for i in range(26):
+        if bitmask & (1 << i):
+            drives.append(f"{string.ascii_uppercase[i]}:\\")
+    return drives
+
+def walk_root(root, target_ending):
+    local_found = []
+    if not root or not os.path.exists(root):
+        return local_found
+
+    for dirpath, dirnames, filenames in os.walk(root):
+        if dirpath.count(os.sep) - root.count(os.sep) > 4:
+            dirnames[:] = []
+            continue
+
+        if dirpath.lower().endswith(target_ending.lower()):
+            local_found.append(Path(dirpath))
+    return local_found
+
+
 def split_dockmaster_name(name):
     """
     Splits a name like '1A-W' into ('1A', 'W') or 'XD10' into ('XD', '10').
@@ -132,43 +158,42 @@ def split_dockmaster_name(name):
 import concurrent.futures
 
 def search_for_game_folders():
-    """Fast search for all Ultima Online folders across multiple roots."""
-    search_roots = [
-        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-        os.environ.get("ProgramW6432", r"C:\Program Files"),
-        r"C:\Games",
-        os.path.join(os.environ.get("USERPROFILE", ""), "AppData", "Local"),
-        os.environ.get("PROGRAMDATA", r"C:\ProgramData"),  # Fixed
-        os.path.join(os.environ.get("USERPROFILE", ""), "Documents"),
-    ]
-
+    """Search for all ClassicUO/Data/Client folders across all drives, with fallback to full-drive scan."""
     target_ending = os.path.join("ClassicUO", "Data", "Client")
     found = []
 
-    def walk_root(root):
-        local_found = []
-        if not root or not os.path.exists(root):
-            return local_found
+    all_drives = get_all_windows_drives()
 
-        for dirpath, dirnames, filenames in os.walk(root):
-            # ✅ Limit how deep we search (e.g. max 5 levels deep)
-            if dirpath.count(os.sep) - root.count(os.sep) > 4:
-                # prevent going deeper by clearing dirnames
-                dirnames[:] = []
-                continue
+    # Build root paths like D:\Games, D:\Program Files, etc.
+    search_roots = []
+    for drive in all_drives:
+        search_roots.extend([
+            os.path.join(drive, "Program Files"),
+            os.path.join(drive, "Program Files (x86)"),
+            os.path.join(drive, "Games"),
+            os.path.join(drive, "Users"),
+            os.path.join(drive, "ProgramData"),
+        ])
 
-            if dirpath.lower().endswith(target_ending.lower()):
-                found.append(Path(dirpath))
-        return local_found
+    def run_search(roots):
+        local_results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(walk_root, root, target_ending) for root in roots]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                    local_results.extend(result)
+                except Exception as e:
+                    print(f"⚠️ Error searching {root}: {e}")
+        return local_results
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        futures = [executor.submit(walk_root, root) for root in search_roots]
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                result = future.result()
-                found.extend(result)
-            except Exception as e:
-                print(f"⚠️ Error searching: {e}")
+    # Initial search (quick, shallow)
+    found = run_search(search_roots)
+
+    # Fallback: deep search across entire drives
+    if not found:
+        print("🔍 No folders found in standard locations. Falling back to full-drive scan...")
+        found = run_search(all_drives)
 
     return found
 
