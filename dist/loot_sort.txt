@@ -1,0 +1,101 @@
+overhead 'Select Guild Chest'
+@setvar! guildChest
+overhead 'Select Distro Chest'
+@setvar! distroChest
+overhead 'Select Loot pouch'
+@setvar! lootPouch
+
+clearignore  
+createlist regTypes
+clearlist regTypes
+
+@pushlist 'regTypes' '3891'
+@pushlist 'regTypes' 'gold coin'
+@pushlist 'regTypes' 'wall shelf'
+@pushlist 'regTypes' 'toy'
+@pushlist 'regTypes' '3827'
+@pushlist 'regTypes' '24434'
+@pushlist 'regTypes' 'bag of gems'
+//@pushlist 'regTypes' 'phylactery'
+
+foreach x in regTypes
+    while findtype x lootPouch any any 1 as found
+        lift found 9999
+        drop guildChest -1 -1 0
+        pause 600
+    endwhile
+    wait 200
+endfor
+
+clearignore 
+createlist ItemTypes
+clearlist ItemTypes
+
+//extract
+@pushlist 'ItemTypes' '3836'
+//core 
+@pushlist 'ItemTypes' '3985'
+//MCD
+@pushlist 'ItemTypes' '24434' 
+//skill orbs
+@pushlist 'ItemTypes' '22336'
+//skill scrolls
+@pushlist 'ItemTypes' '8826'
+//skill scrolls
+@pushlist 'ItemTypes' '17087'
+//distills
+@pushlist 'ItemTypes' '17686'
+// ship upgrades
+@pushlist 'ItemTypes' '5362'
+// phylacs
+@pushlist 'ItemTypes' 'phylactery'
+// chroma distills
+@pushlist 'ItemTypes' '4026'
+// chroma cores
+@pushlist 'ItemTypes' '4025'
+// adv bag
+@pushlist 'ItemTypes' '37181'
+
+foreach x in ItemTypes
+    while findtype x lootPouch any any 1 as found
+        lift found 1
+        drop distroChest 10 10 0
+        pause 600
+    endwhile
+endfor
+
+# move tmaps to distro
+while findtype '5356' lootPouch 0 as item
+    lift item 60000
+    drop distroChest 10 10 0
+    wait 600
+endwhile
+
+# move mining maps to guild
+while findtype '5356' lootPouch 2796 as item
+    lift item 60000
+    drop guildChest 10 10 0
+    wait 600
+endwhile
+
+# move skinning maps to guild
+while findtype '5356' lootPouch 2651 as item
+    lift item 60000
+    drop guildChest 10 10 0
+    wait 600
+endwhile
+
+# move lumber maps to guild
+while findtype '5356' lootPouch 2799 as item
+    lift item 60000
+    drop guildChest 10 10 0
+    wait 600
+endwhile
+
+# move fishing maps to guild
+while findtype '5356' lootPouch 2904 as item
+    lift item 60000
+    drop guildChest 10 10 0
+    wait 600
+endwhile```
+

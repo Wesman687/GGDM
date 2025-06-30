@@ -11,7 +11,8 @@ import ctypes
 import sys
 from tkinter import filedialog, Tk
 from PIL import Image, ImageDraw, ImageFont
-DEBUG_MODE = False
+import os
+DEBUG_MODE = os.getenv("DM_DEBUG", "0") == "1"
 
 def log_debug(message):
     if DEBUG_MODE:
@@ -65,16 +66,22 @@ def split_name(name):
 def is_treasure_marker(name):
     return re.match(r"^(N|E|S|W|CC|X)\d+$", name.upper())
 
+
 def is_dockmaster_marker(name):
     name = name.upper()
     return (
-        re.match(r"^\d+[A-Z]-[NESW]$", name) or  # e.g., 1A-W
-        re.match(r"^XD\d+$", name) or           # e.g., XD13
-        re.match(r"^XP\d+$", name) or           # e.g., XP2
-        re.match(r"^PUB[-]?(X\d+|\d+)$", name)   # e.g., PUB-X3, PUB9
+        re.match(r"^\d+[A-Z]-[NESW]$", name) or       # e.g., 1A-W
+        re.match(r"^XD\d+$", name) or                # e.g., XD13
+        re.match(r"^XP\d+$", name) or                # e.g., XP2
+        re.match(r"^PUB[-]?(X\d+|\d+)$", name) or     # e.g., PUB-X3, PUB9
+        re.match(r"^M(?:[1-9]|1[0-9]|2[0-9]|30)$", name)  # M1–M30
     )
 
-def create_marker_icon(name, output_dir, top_font, bottom_font):
+def is_large_marker(name):
+    name = name.upper()
+    return re.match(r"^M(?:[1-9]|1[0-9]|2[0-9]|30)$", name) is not None
+
+def create_marker_icon(name, output_dir, base_top_font, base_bottom_font):
     try:
         log_debug(f"== Creating icon: {name}")
         log_debug(f"Output folder: {output_dir}")
@@ -88,29 +95,54 @@ def create_marker_icon(name, output_dir, top_font, bottom_font):
         else:
             color = "gray"
 
-        width, height = 54, 54
-        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        # === M-marker logic ===
+        if is_large_marker(name):
+            icon_size = 108
+            canvas_size = 256  # Add transparency padding
+            top_font = ImageFont.truetype(base_top_font.path, base_top_font.size * 2)
+            bottom_font = ImageFont.truetype(base_bottom_font.path, base_bottom_font.size * 2)
+        else:
+            icon_size = 54
+            canvas_size = 54
+            top_font = base_top_font
+            bottom_font = base_bottom_font
+
+        # === Create canvas (with or without padding)
+        canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
         draw = ImageDraw.Draw(canvas)
 
-        top_bbox = draw.textbbox((0, 0), top_text, font=top_font)
+        # === If padding, draw in center; else, draw normally
+        draw_x = (canvas_size - icon_size) // 2
+        draw_y = (canvas_size - icon_size) // 2
+
+        # === Sub-layer for drawing text (optional but cleaner)
+        icon_layer = Image.new("RGBA", (icon_size, icon_size), (0, 0, 0, 0))
+        icon_draw = ImageDraw.Draw(icon_layer)
+
+        # === Text positioning
+        top_bbox = icon_draw.textbbox((0, 0), top_text, font=top_font)
         top_width, top_height = top_bbox[2] - top_bbox[0], top_bbox[3] - top_bbox[1]
-        top_x = (width - top_width) // 2
+        top_x = (icon_size - top_width) // 2
         top_y = 2
 
-        bottom_bbox = draw.textbbox((0, 0), bottom_text, font=bottom_font)
+        bottom_bbox = icon_draw.textbbox((0, 0), bottom_text, font=bottom_font)
         bottom_width = bottom_bbox[2] - bottom_bbox[0]
-        bottom_x = (width - bottom_width) // 2
         spacing = 4
+        bottom_x = (icon_size - bottom_width) // 2
         bottom_y = top_y + top_height + spacing
 
+        # === Draw text with shadow
         for x_off in [-1, 0, 1]:
             for y_off in [-1, 0, 1]:
                 if x_off or y_off:
-                    draw.text((top_x + x_off, top_y + y_off), top_text, font=top_font, fill="black")
-                    draw.text((bottom_x + x_off, bottom_y + y_off), bottom_text, font=bottom_font, fill="black")
+                    icon_draw.text((top_x + x_off, top_y + y_off), top_text, font=top_font, fill="black")
+                    icon_draw.text((bottom_x + x_off, bottom_y + y_off), bottom_text, font=bottom_font, fill="black")
 
-        draw.text((top_x, top_y), top_text, font=top_font, fill=color)
-        draw.text((bottom_x, bottom_y), bottom_text, font=bottom_font, fill=color)
+        icon_draw.text((top_x, top_y), top_text, font=top_font, fill=color)
+        icon_draw.text((bottom_x, bottom_y), bottom_text, font=bottom_font, fill=color)
+
+        # === Paste small icon layer into main canvas (centered for M-markers)
+        canvas.paste(icon_layer, (draw_x, draw_y), icon_layer)
 
         os.makedirs(output_dir, exist_ok=True)
         output_file = os.path.join(output_dir, f"{name}.png")
@@ -119,8 +151,7 @@ def create_marker_icon(name, output_dir, top_font, bottom_font):
 
     except Exception as e:
         log_debug(f"❌ Failed to create icon for {name}: {e}")
-        traceback_str = traceback.format_exc()
-        log_debug(traceback_str)
+        log_debug(traceback.format_exc())
 
 
 def get_all_windows_drives():
@@ -268,6 +299,71 @@ def ensure_icon_exists(icon_name, output_folder, top_font, bottom_font):
         create_marker_icon(icon_name, output_folder, top_font, bottom_font)
             
 
+def install_gridlines(mapicons_path, client_path, FILL_COLOR=(180, 180, 180, 180)):
+    print("🧱 Generating gridline markers and icon...")
+    log_debug("📐 install_gridlines() called")
+
+    # === Grid config ===
+    GRID_STEP = 1000
+    X_RANGE = (0, 4700)
+    Y_RANGE = (0, 6100)
+    canvas_size = 128
+    center = canvas_size // 2
+    HLINE_SPACING = 10
+    VLINE_SPACING = 10
+    icon_name = "gridline"
+
+    # === Draw single line icon ===
+    def draw_gridline_icon():
+        log_debug("🎨 Drawing shared gridline icon")
+        icon = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(icon)
+        dot_size = 3
+        half = dot_size // 2
+        draw.rectangle(
+            [(center - half, center - half), (center + half, center + half)],
+            fill=FILL_COLOR
+        )
+        try:
+            os.makedirs(mapicons_path, exist_ok=True)
+            save_path = mapicons_path / f"{icon_name}.png"
+            icon.save(save_path)
+            log_debug(f"💾 Saved gridline icon: {save_path}")
+        except Exception as e:
+            log_debug(f"❌ Failed to save icon: {e}")
+
+    draw_gridline_icon()
+
+    # === Build XML markers ===
+    pack = ET.Element("Pack", Name="Gridlines", Revision="0")
+
+    for y in range(Y_RANGE[0] + GRID_STEP, Y_RANGE[1] + 1, GRID_STEP):
+        for x in range(X_RANGE[0], X_RANGE[1] + 1, HLINE_SPACING):
+            marker = ET.Element("Marker", Name=f"{x},{y}", X=str(x), Y=str(y), Icon=icon_name, Facet="0")
+            pack.append(marker)
+
+    for x in range(X_RANGE[0] + GRID_STEP, X_RANGE[1] + 1, GRID_STEP):
+        for y in range(Y_RANGE[0], Y_RANGE[1] + 1, VLINE_SPACING):
+            if y % GRID_STEP == 0:
+                continue
+            marker = ET.Element("Marker", Name=f"{x},{y}", X=str(x), Y=str(y), Icon=icon_name, Facet="0")
+            pack.append(marker)
+
+    # === Save XML ===
+    xml_string = ET.tostring(pack, encoding="utf-8")
+    pretty = xml.dom.minidom.parseString(xml_string).toprettyxml(indent="  ", encoding="UTF-8")
+
+    gridlines_xml_path = client_path / "Gridlines.xml"
+    try:
+        with open(gridlines_xml_path, "wb") as f:
+            f.write(pretty.replace(b"\n", b"\r\n"))
+        print(f"✅ Gridlines.xml written to {gridlines_xml_path}")
+        log_debug(f"✅ Gridlines.xml written to {gridlines_xml_path}")
+    except Exception as e:
+        print(f"❌ Failed to write Gridlines.xml: {e}")
+        log_debug(f"❌ Failed to write Gridlines.xml: {e}")
+
+    
 def update_markers():
     try:
         log_debug("🔧 Starting update_markers()")
@@ -302,7 +398,7 @@ def update_markers():
                 log_debug(f"  [{idx+1}] {path}")
 
             while True:
-                choice = input("\nPlease select which installation to update (1 - {}): ".format(len(client_paths)))
+                choice = input(f"\nPlease select which installation to update (1 - {len(client_paths)}): ")
                 if choice.isdigit():
                     choice_idx = int(choice) - 1
                     if 0 <= choice_idx < len(client_paths):
@@ -317,10 +413,10 @@ def update_markers():
             log_debug("❌ No valid client path selected. Exiting early.")
             return
 
-        # ✅ NOW you can build the mapicons path
         mapicons_path = client_path / "MapIcons"
         log_debug(f"🖼️ Icon output path: {mapicons_path}")
 
+        # === Update regular marker packs ===
         for file_info in FILES_TO_DOWNLOAD:
             selected_icon = file_info["icon"]
             full_url = GITHUB_BASE_URL + file_info["filename"].replace(" ", "%20")
@@ -334,7 +430,6 @@ def update_markers():
 
             lines = response.text.strip().splitlines()
             log_debug(f"📄 Downloaded {len(lines)} lines from {file_info['filename']}")
-
             markers = []
 
             for line in lines:
@@ -348,7 +443,7 @@ def update_markers():
             markers.sort(key=custom_sort)
             log_debug(f"✅ Parsed and sorted {len(markers)} markers from {file_info['filename']}")
 
-            # Build XML
+            # Write XML
             pack = ET.Element("Pack", Name=file_info["pack_name"], Revision="0")
             for marker in markers:
                 pack.append(marker)
@@ -357,7 +452,6 @@ def update_markers():
             reparsed = xml.dom.minidom.parseString(rough_string)
             pretty_xml = reparsed.toprettyxml(indent="  ", encoding="UTF-8")
 
-            # Write XML
             xml_path = client_path / file_info["output_xml"]
             os.makedirs(xml_path.parent, exist_ok=True)
 
@@ -371,6 +465,56 @@ def update_markers():
             except Exception as e:
                 print(f"❌ Failed to write {file_info['output_xml']}: {e}")
                 log_debug(f"❌ Failed to write XML {file_info['output_xml']}: {e}")
+
+        # === Prompt for gridlines AFTER all standard packs are handled ===
+        install_grid = input("📐 Do you want to install gridlines? (y/n): ").strip().lower()
+        if install_grid == "y":
+            log_debug("🧱 User chose to install gridlines.")
+            print("\n🎨 Choose a gridline color:")
+            preset_colors = {
+                "1": ("Light Gray", (180, 180, 180)),
+                "2": ("Cyan", (0, 255, 255)),
+                "3": ("Red", (255, 80, 80)),
+                "4": ("Green", (80, 255, 80)),
+                "5": ("Yellow", (255, 255, 100)),
+                "6": ("Orange", (255, 165, 0)),
+                "7": ("Purple", (160, 32, 240)),
+                "8": ("Pink", (255, 105, 180)),
+                "9": ("White", (255, 255, 255)),
+                "10": ("Custom RGB (e.g. 100,100,100)", None),
+            }
+
+            for key, (label, _) in preset_colors.items():
+                print(f"  [{key}] {label}")
+
+            color_choice = input("Select a color preset [1–10]: ").strip()
+            if color_choice in preset_colors and color_choice != "10":
+                base_rgb = preset_colors[color_choice][1]
+            else:
+                custom_input = input("Enter custom RGB (comma or space-separated, e.g. 60,60,60 or 60 60 60): ").strip()
+                try:
+                    base_rgb = tuple(int(c.strip()) for c in custom_input.replace(" ", ",").split(","))
+                    if len(base_rgb) != 3:
+                        raise ValueError()
+                except Exception:
+                    print("⚠️ Invalid format. Using default light gray.")
+                    base_rgb = (180, 180, 180)
+
+            FILL_COLOR = base_rgb + (255,)
+
+
+            install_gridlines(mapicons_path, client_path, FILL_COLOR)
+        else:
+            log_debug("🧱 User skipped gridline installation.")
+            gridline_path = client_path / "Gridlines.xml"
+            if gridline_path.exists():
+                try:
+                    os.remove(gridline_path)
+                    print("🧹 Removed existing Gridlines.xml")
+                    log_debug("🧹 Removed Gridlines.xml because user chose not to install.")
+                except Exception as e:
+                    print(f"⚠️ Failed to remove Gridlines.xml: {e}")
+                    log_debug(f"⚠️ Failed to delete Gridlines.xml: {e}")
 
     except Exception as e:
         print("❌ Error in update_markers()")

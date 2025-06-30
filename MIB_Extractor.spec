@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['dm.py'],
+    ['mib.py'],
     pathex=[],
     binaries=[],
-    datas=[('DejaVuSans-Bold.ttf', '.')],
+    datas=[],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -22,7 +22,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='dm',
+    name='MIB_Extractor',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    manifest='mib.manifest',
 )
