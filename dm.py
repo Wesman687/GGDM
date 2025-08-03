@@ -198,15 +198,13 @@ def split_dockmaster_name(name):
 
 
 import concurrent.futures
-
 def search_for_game_folders():
-    """Search for all ClassicUO/Data/Client folders across all drives, with fallback to full-drive scan."""
+    """Search for all ClassicUO/Data/Client folders across all drives with user-driven scan options."""
     target_ending = os.path.join("ClassicUO", "Data", "Client")
     found = []
 
+    # Initial quick scan in common locations
     all_drives = get_all_windows_drives()
-
-    # Build root paths like D:\Games, D:\Program Files, etc.
     search_roots = []
     for drive in all_drives:
         search_roots.extend([
@@ -227,18 +225,70 @@ def search_for_game_folders():
                     local_results.extend(result)
                 except Exception as e:
                     print(f"⚠️ Error searching {root}: {e}")
+                    log_debug(f"⚠️ Error searching {root}: {e}")
         return local_results
 
-    # Initial search (quick, shallow)
+    # Perform initial quick scan
+    print("🔍 Performing quick scan in common locations...")
     found = run_search(search_roots)
 
-    # Fallback: deep search across entire drives
-    if not found:
-        print("🔍 No folders found in standard locations. Falling back to full-drive scan...")
-        log_debug("Not Found in normal drive, searching for multiple drives.")
+    if found:
+        return found
+
+    # If nothing found, show drives and prompt user
+    print("\n⚠️ No Ultima Online installations found in common locations.")
+    print("Available drives:")
+    for idx, drive in enumerate(all_drives, 1):
+        print(f"  [{idx}] {drive}")
+
+    prompt = (
+        "\nEnter the numbers of drives to quick scan (e.g., '1 2 3' or '1,2,3'), "
+        "or press Enter to perform a full scan of all drives: "
+    )
+    user_input = input(prompt).strip()
+
+    if not user_input:
+        # Full scan of all drives
+        print("🔍 Performing full scan of all drives...")
+        log_debug("User chose full scan of all drives.")
         found = run_search(all_drives)
+    else:
+        # Parse user input for specific drives
+        try:
+            selected_indices = [
+                int(i.strip()) - 1 for i in user_input.replace(",", " ").split()
+            ]
+            valid_indices = [i for i in selected_indices if 0 <= i < len(all_drives)]
+            if not valid_indices:
+                print("⚠️ No valid drive numbers selected. Performing full scan...")
+                log_debug("No valid drive numbers selected, falling back to full scan.")
+                found = run_search(all_drives)
+            else:
+                selected_drives = [all_drives[i] for i in valid_indices]
+                print(f"🔍 Performing quick scan on selected drives: {', '.join(selected_drives)}")
+                log_debug(f"User selected drives for quick scan: {selected_drives}")
+                # Build search roots for selected drives
+                selected_roots = []
+                for drive in selected_drives:
+                    selected_roots.extend([
+                        os.path.join(drive, "Program Files"),
+                        os.path.join(drive, "Program Files (x86)"),
+                        os.path.join(drive, "Games"),
+                        os.path.join(drive, "Users"),
+                        os.path.join(drive, "ProgramData"),
+                    ])
+                found = run_search(selected_roots)
+                if not found:
+                    print("⚠️ No installations found on selected drives. Performing full scan...")
+                    log_debug("No installations found on selected drives, falling back to full scan.")
+                    found = run_search(all_drives)
+        except ValueError:
+            print("⚠️ Invalid input. Performing full scan...")
+            log_debug("Invalid input for drive selection, falling back to full scan.")
+            found = run_search(all_drives)
 
     return found
+
 
 
 def get_resource_path(relative_path):
@@ -279,20 +329,21 @@ def custom_sort(marker):
     
 
 def parse_line(line, default_icon):
-    if not line.startswith("+"):
+    parts = line.strip().split()
+    if len(parts) != 5:
         return None
-    parts = line[1:].strip().split()
-    if len(parts) >= 5:
-        name = " ".join(parts[:-4])
-        x, y = parts[-4], parts[-3]
 
-        if is_treasure_marker(name) or is_dockmaster_marker(name):
-            icon = name  # use marker name
-        else:
-            icon = default_icon  # fallback to default (e.g., 'shipwright')
+    name, x, y, facet, visible = parts
 
-        return ET.Element("Marker", Name=name, X=x, Y=y, Icon=icon, Facet="0")
-    return None
+    if visible.lower() != "true":
+        return None
+
+    if is_treasure_marker(name) or is_dockmaster_marker(name):
+        icon = name  # use marker name
+    else:
+        icon = default_icon  # fallback icon (e.g., 'shipwright')
+
+    return ET.Element("Marker", Name=name, X=x, Y=y, Icon=icon, Facet=facet)
 
 def ensure_icon_exists(icon_name, output_folder, top_font, bottom_font):
     if is_treasure_marker(icon_name) or is_dockmaster_marker(icon_name):
