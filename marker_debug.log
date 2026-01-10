@@ -1,1 +1,13 @@
 === Debug Log Started ===
+🔧 Starting update_markers()
+📁 Font path resolved to: E:\Python\Discord_Bot\GGDM\DejaVuSans-Bold.ttf
+✅ Custom TTF font loaded successfully.
+🔍 Detected game folders: [WindowsPath('C:/Program Files (x86)/Ultima Online Outlands/ClassicUO/Data/Client'), WindowsPath('F:/Program Files (x86)/Ultima Online Outlands/ClassicUO/Data/Client')]
+  [1] C:\Program Files (x86)\Ultima Online Outlands\ClassicUO\Data\Client
+  [2] F:\Program Files (x86)\Ultima Online Outlands\ClassicUO\Data\Client
+❌ Exception in update_markers(): EOF when reading a line
+Traceback (most recent call last):
+  File "E:\Python\Discord_Bot\GGDM\dm.py", line 590, in update_markers
+    choice = input(f"\nPlease select which installation to update (1 - {len(client_paths)}): ")
+EOFError: EOF when reading a line
+
