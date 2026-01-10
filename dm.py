@@ -208,7 +208,7 @@ def create_marker_icon(name, output_dir, base_top_font, base_bottom_font):
         log_debug(traceback.format_exc())
 
 
-def create_house_icon(output_dir, icon_name="house", color=HOUSE_COLOR, size=12):
+def create_house_icon(output_dir, icon_name="house", color=HOUSE_COLOR, size=8):
     """
     Create a simple colored circle icon for player houses.
 
@@ -536,7 +536,7 @@ def ensure_icon_exists(icon_name, output_folder, top_font, bottom_font):
     if is_treasure_marker(icon_name) or is_dockmaster_marker(icon_name):
         create_marker_icon(icon_name, output_folder, top_font, bottom_font)
     elif icon_name == "house":
-        create_house_icon(output_folder, icon_name, HOUSE_COLOR, size=12)
+        create_house_icon(output_folder, icon_name, HOUSE_COLOR, size=8)
             
 
 def install_gridlines(mapicons_path, client_path, FILL_COLOR=(180, 180, 180, 180)):
