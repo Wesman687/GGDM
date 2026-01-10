@@ -6,15 +6,46 @@ import traceback
 import xml.etree.ElementTree as ET
 import xml.dom.minidom
 import requests
+import yaml
 from pathlib import Path
 import ctypes
 import sys
 from tkinter import filedialog, Tk
 from PIL import Image, ImageDraw, ImageFont
-import os
+
+# Fix console encoding for Windows
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 DEBUG_MODE = os.getenv("DM_DEBUG", "0") == "1"
 
+
+def safe_print(message):
+    """
+    Print a message safely, handling Unicode encoding errors.
+
+    Args:
+        message: The message to print
+    """
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        # Strip emojis and special characters if encoding fails
+        clean_message = message.encode('ascii', 'ignore').decode('ascii')
+        print(clean_message)
+
+
 def log_debug(message):
+    """
+    Write a debug message to the log file.
+
+    Args:
+        message: The message to log
+    """
     if DEBUG_MODE:
         with open("marker_debug.log", "a", encoding="utf-8") as log:
             log.write(message + "\n")
@@ -27,27 +58,41 @@ def get_resource_path(filename):
 
 TREASURE_COLOR = "#FF33CC"
 DOCKMASTER_COLOR = "#00FFFF"
+HOUSE_COLOR = "#00FF00"  # Green for player houses
 
 # Constants
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/LeoPiro/GG_Dms/main/"
-FILES_TO_DOWNLOAD = [
+
+# Marker packs with YAML preferred, text fallback
+# New dm.exe will try YAML first; old dm.exe will only see the text file
+MARKER_PACKS = [
     {
-        "filename": "GG DOCKMASTERS.txt",
+        "yaml_filename": "dockmasters.yaml",
+        "text_filename": "GG DOCKMASTERS.txt",
         "output_xml": "GG_Dockmasters.xml",
         "pack_name": "GG DOCKMASTERS",
-        "icon": "shipwright"
+        "default_icon": "shipwright"
     },
     {
-        "filename": "PUBLIC DOCKMASTERS.txt",
+        "yaml_filename": "public_dockmasters.yaml",
+        "text_filename": "PUBLIC DOCKMASTERS.txt",
         "output_xml": "Public_Dockmasters.xml",
         "pack_name": "Public DOCKMASTERS",
-        "icon": "shipwright"
+        "default_icon": "shipwright"
     },
     {
-        "filename": "TREASURE.txt",
+        "yaml_filename": "treasure.yaml",
+        "text_filename": "TREASURE.txt",
         "output_xml": "Treasure_Map_Locations.xml",
         "pack_name": "Treasure Map Locations",
-        "icon": "landmark"
+        "default_icon": "landmark"
+    },
+    {
+        "yaml_filename": "playerhouses.yaml",
+        "text_filename": None,                      # No legacy text format
+        "output_xml": "Player_Houses.xml",
+        "pack_name": "Player Houses",
+        "default_icon": "house"
     },
 ]
 
@@ -64,7 +109,16 @@ def split_name(name):
     return name.upper(), ""
 
 def is_treasure_marker(name):
-    return re.match(r"^(N|E|S|W|CC|X)\d+$", name.upper())
+    """
+    Check if a marker name matches treasure location patterns.
+
+    Args:
+        name: The marker name to check
+
+    Returns:
+        True if the name matches a treasure marker pattern
+    """
+    return re.match(r"^(N|E|S|W|CC|X|A)\d+$", name.upper())
 
 
 def is_dockmaster_marker(name):
@@ -154,6 +208,45 @@ def create_marker_icon(name, output_dir, base_top_font, base_bottom_font):
         log_debug(traceback.format_exc())
 
 
+def create_house_icon(output_dir, icon_name="house", color=HOUSE_COLOR, size=12):
+    """
+    Create a simple colored circle icon for player houses.
+
+    Args:
+        output_dir: Directory to save the icon
+        icon_name: Name of the icon file (without extension)
+        color: Fill color for the circle (default green)
+        size: Size of the icon in pixels (default 12)
+    """
+    try:
+        log_debug(f"== Creating house icon: {icon_name} ({size}x{size})")
+
+        # Create transparent canvas
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+
+        # Draw filled circle with black outline
+        # Black outline circle
+        draw.ellipse(
+            [(0, 0), (size - 1, size - 1)],
+            fill="black"
+        )
+        # Colored fill (slightly smaller for outline effect)
+        draw.ellipse(
+            [(1, 1), (size - 2, size - 2)],
+            fill=color
+        )
+
+        os.makedirs(output_dir, exist_ok=True)
+        output_file = os.path.join(output_dir, f"{icon_name}.png")
+        canvas.save(output_file)
+        log_debug(f"✅ Saved house icon to: {output_file}")
+
+    except Exception as e:
+        log_debug(f"❌ Failed to create house icon: {e}")
+        log_debug(traceback.format_exc())
+
+
 def get_all_windows_drives():
     """Returns a list of all available drive letters on Windows, like ['C:\\', 'D:\\']"""
     drives = []
@@ -224,22 +317,22 @@ def search_for_game_folders():
                     result = future.result()
                     local_results.extend(result)
                 except Exception as e:
-                    print(f"⚠️ Error searching {root}: {e}")
+                    safe_print(f"⚠️ Error searching {root}: {e}")
                     log_debug(f"⚠️ Error searching {root}: {e}")
         return local_results
 
     # Perform initial quick scan
-    print("🔍 Performing quick scan in common locations...")
+    safe_print("🔍 Performing quick scan in common locations...")
     found = run_search(search_roots)
 
     if found:
         return found
 
     # If nothing found, show drives and prompt user
-    print("\n⚠️ No Ultima Online installations found in common locations.")
-    print("Available drives:")
+    safe_print("\n⚠️ No Ultima Online installations found in common locations.")
+    safe_print("Available drives:")
     for idx, drive in enumerate(all_drives, 1):
-        print(f"  [{idx}] {drive}")
+        safe_print(f"  [{idx}] {drive}")
 
     prompt = (
         "\nEnter the numbers of drives to quick scan (e.g., '1 2 3' or '1,2,3'), "
@@ -249,7 +342,7 @@ def search_for_game_folders():
 
     if not user_input:
         # Full scan of all drives
-        print("🔍 Performing full scan of all drives...")
+        safe_print("🔍 Performing full scan of all drives...")
         log_debug("User chose full scan of all drives.")
         found = run_search(all_drives)
     else:
@@ -260,12 +353,12 @@ def search_for_game_folders():
             ]
             valid_indices = [i for i in selected_indices if 0 <= i < len(all_drives)]
             if not valid_indices:
-                print("⚠️ No valid drive numbers selected. Performing full scan...")
+                safe_print("⚠️ No valid drive numbers selected. Performing full scan...")
                 log_debug("No valid drive numbers selected, falling back to full scan.")
                 found = run_search(all_drives)
             else:
                 selected_drives = [all_drives[i] for i in valid_indices]
-                print(f"🔍 Performing quick scan on selected drives: {', '.join(selected_drives)}")
+                safe_print(f"🔍 Performing quick scan on selected drives: {', '.join(selected_drives)}")
                 log_debug(f"User selected drives for quick scan: {selected_drives}")
                 # Build search roots for selected drives
                 selected_roots = []
@@ -279,11 +372,11 @@ def search_for_game_folders():
                     ])
                 found = run_search(selected_roots)
                 if not found:
-                    print("⚠️ No installations found on selected drives. Performing full scan...")
+                    safe_print("⚠️ No installations found on selected drives. Performing full scan...")
                     log_debug("No installations found on selected drives, falling back to full scan.")
                     found = run_search(all_drives)
         except ValueError:
-            print("⚠️ Invalid input. Performing full scan...")
+            safe_print("⚠️ Invalid input. Performing full scan...")
             log_debug("Invalid input for drive selection, falling back to full scan.")
             found = run_search(all_drives)
 
@@ -329,6 +422,16 @@ def custom_sort(marker):
     
 
 def parse_line(line, default_icon):
+    """
+    Parse a line from the legacy text format.
+
+    Args:
+        line: A line of text in format "Name X Y Facet Visible"
+        default_icon: Fallback icon name if marker doesn't match known patterns
+
+    Returns:
+        An XML Element for the marker, or None if invalid/hidden
+    """
     parts = line.strip().split()
     if len(parts) != 5:
         return None
@@ -345,13 +448,99 @@ def parse_line(line, default_icon):
 
     return ET.Element("Marker", Name=name, X=x, Y=y, Icon=icon, Facet=facet)
 
+
+def parse_yaml_markers(yaml_content, default_icon, default_facet=0):
+    """
+    Parse YAML marker data into a list of marker elements.
+
+    Supports multiple root keys: dockmasters, markers, houses, locations.
+
+    Args:
+        yaml_content: Raw YAML string content
+        default_icon: Fallback icon name for non-standard markers
+        default_facet: Default map facet (0 for Outlands)
+
+    Returns:
+        Tuple of (list of XML marker elements, pack_name, revision)
+    """
+    data = yaml.safe_load(yaml_content)
+
+    pack_name = data.get("pack_name", "Markers")
+    revision = data.get("revision", 0)
+
+    # Support multiple root keys for flexibility
+    marker_data = {}
+    for key in ["dockmasters", "markers", "houses", "locations", "treasures"]:
+        if key in data and data[key]:
+            marker_data = data[key]
+            log_debug(f"📋 Using '{key}' as marker root key")
+            break
+
+    if not marker_data:
+        log_debug("⚠️ No marker data found in YAML")
+        return [], pack_name, revision
+
+    markers = []
+    for name, attributes in marker_data.items():
+        # Handle case where attributes might be None
+        if attributes is None:
+            log_debug(f"⚠️ Skipping {name}: no attributes defined")
+            continue
+
+        x = attributes.get("x")
+        y = attributes.get("y")
+        owner = attributes.get("owner", "unknown")
+        facet = attributes.get("facet", default_facet)
+        visible = attributes.get("visible", True)
+
+        # Skip if missing required coordinates or not visible
+        if x is None or y is None:
+            log_debug(f"⚠️ Skipping {name}: missing x or y coordinate")
+            continue
+
+        if not visible:
+            log_debug(f"⚠️ Skipping {name}: marked as not visible")
+            continue
+
+        # Determine icon name
+        if is_treasure_marker(name) or is_dockmaster_marker(name):
+            icon = name
+        else:
+            icon = attributes.get("icon", default_icon)
+
+        marker = ET.Element(
+            "Marker",
+            Name=name,
+            X=str(x),
+            Y=str(y),
+            Icon=icon,
+            Facet=str(facet)
+        )
+        markers.append(marker)
+
+        log_debug(f"✅ Parsed marker: {name} at ({x}, {y}) owner={owner}")
+
+    return markers, pack_name, revision
+
+
 def ensure_icon_exists(icon_name, output_folder, top_font, bottom_font):
+    """
+    Create a marker icon if it matches known patterns.
+
+    Args:
+        icon_name: Name of the icon to create
+        output_folder: Directory to save the icon
+        top_font: Font for top text
+        bottom_font: Font for bottom text
+    """
     if is_treasure_marker(icon_name) or is_dockmaster_marker(icon_name):
         create_marker_icon(icon_name, output_folder, top_font, bottom_font)
+    elif icon_name == "house":
+        create_house_icon(output_folder, icon_name, HOUSE_COLOR, size=12)
             
 
 def install_gridlines(mapicons_path, client_path, FILL_COLOR=(180, 180, 180, 180)):
-    print("🧱 Generating gridline markers and icon...")
+    safe_print("🧱 Generating gridline markers and icon...")
     log_debug("📐 install_gridlines() called")
 
     # === Grid config ===
@@ -408,10 +597,10 @@ def install_gridlines(mapicons_path, client_path, FILL_COLOR=(180, 180, 180, 180
     try:
         with open(gridlines_xml_path, "wb") as f:
             f.write(pretty.replace(b"\n", b"\r\n"))
-        print(f"✅ Gridlines.xml written to {gridlines_xml_path}")
+        safe_print(f"✅ Gridlines.xml written to {gridlines_xml_path}")
         log_debug(f"✅ Gridlines.xml written to {gridlines_xml_path}")
     except Exception as e:
-        print(f"❌ Failed to write Gridlines.xml: {e}")
+        safe_print(f"❌ Failed to write Gridlines.xml: {e}")
         log_debug(f"❌ Failed to write Gridlines.xml: {e}")
 
     
@@ -428,7 +617,7 @@ def update_markers():
             log_debug("✅ Custom TTF font loaded successfully.")
         except IOError as e:
             log_debug(f"⚠️ Failed to load TTF font: {e}")
-            print("⚠️ Couldn't load embedded TTF font, using default.")
+            safe_print("⚠️ Couldn't load embedded TTF font, using default.")
             top_font = ImageFont.load_default()
             bottom_font = ImageFont.load_default()
 
@@ -436,16 +625,16 @@ def update_markers():
         log_debug(f"🔍 Detected game folders: {client_paths}")
 
         if not client_paths:
-            print("⚠️ Could not auto-detect any Ultima Online installations.")
+            safe_print("⚠️ Could not auto-detect any Ultima Online installations.")
             client_path = prompt_user_for_folder()
             log_debug(f"🧭 User selected folder: {client_path}")
         elif len(client_paths) == 1:
             client_path = client_paths[0]
             log_debug(f"✅ Single client path auto-selected: {client_path}")
         else:
-            print("🔍 Multiple Ultima Online installations found:")
+            safe_print("🔍 Multiple Ultima Online installations found:")
             for idx, path in enumerate(client_paths):
-                print(f"  [{idx+1}] {path}")
+                safe_print(f"  [{idx+1}] {path}")
                 log_debug(f"  [{idx+1}] {path}")
 
             while True:
@@ -456,46 +645,86 @@ def update_markers():
                         client_path = client_paths[choice_idx]
                         log_debug(f"✅ User selected client path: {client_path}")
                         break
-                print("⚠️ Invalid choice. Try again.")
+                safe_print("⚠️ Invalid choice. Try again.")
                 log_debug("⚠️ Invalid choice input received.")
 
         if not client_path or not client_path.exists():
-            print("❌ No valid folder selected. Exiting.")
+            safe_print("❌ No valid folder selected. Exiting.")
             log_debug("❌ No valid client path selected. Exiting early.")
             return
 
         mapicons_path = client_path / "MapIcons"
         log_debug(f"🖼️ Icon output path: {mapicons_path}")
 
-        # === Update regular marker packs ===
-        for file_info in FILES_TO_DOWNLOAD:
-            selected_icon = file_info["icon"]
-            full_url = GITHUB_BASE_URL + file_info["filename"].replace(" ", "%20")
-            log_debug(f"🌐 Fetching: {file_info['filename']} → {full_url}")
+        # === Process marker packs (YAML preferred, text fallback) ===
+        for file_info in MARKER_PACKS:
+            default_icon = file_info["default_icon"]
+            yaml_filename = file_info.get("yaml_filename")
+            text_filename = file_info.get("text_filename")
 
-            response = requests.get(full_url)
-            if response.status_code != 200:
-                print(f"❌ Failed to download {file_info['filename']}: HTTP {response.status_code}")
-                log_debug(f"❌ Download failed: {file_info['filename']} → HTTP {response.status_code}")
+            markers = []
+            pack_name = file_info["pack_name"]
+            revision = 0
+            used_format = None
+
+            # Try YAML first if available
+            if yaml_filename:
+                yaml_url = GITHUB_BASE_URL + yaml_filename.replace(" ", "%20")
+                log_debug(f"🌐 Trying YAML: {yaml_filename} → {yaml_url}")
+
+                response = requests.get(yaml_url)
+                if response.status_code == 200:
+                    log_debug(f"📄 Downloaded YAML content from {yaml_filename}")
+                    try:
+                        markers, pack_name, revision = parse_yaml_markers(
+                            response.text, default_icon
+                        )
+                        used_format = "YAML"
+                        safe_print(f"✅ Using YAML format: {yaml_filename}")
+                    except Exception as e:
+                        safe_print(f"⚠️ Failed to parse YAML {yaml_filename}: {e}")
+                        log_debug(f"⚠️ YAML parse error, will try text fallback: {e}")
+                        markers = []  # Reset to try text fallback
+                else:
+                    log_debug(f"⚠️ YAML not found (HTTP {response.status_code}), trying text fallback")
+
+            # Fall back to text format if YAML failed or wasn't available
+            if not markers and text_filename:
+                text_url = GITHUB_BASE_URL + text_filename.replace(" ", "%20")
+                log_debug(f"🌐 Trying text fallback: {text_filename} → {text_url}")
+
+                response = requests.get(text_url)
+                if response.status_code == 200:
+                    lines = response.text.strip().splitlines()
+                    log_debug(f"📄 Downloaded {len(lines)} lines from {text_filename}")
+
+                    for line in lines:
+                        marker = parse_line(line, default_icon)
+                        if marker is not None:
+                            markers.append(marker)
+
+                    used_format = "text"
+                    safe_print(f"✅ Using text format: {text_filename}")
+                else:
+                    safe_print(f"❌ Failed to download {text_filename}: HTTP {response.status_code}")
+                    log_debug(f"❌ Download failed: {text_filename} → HTTP {response.status_code}")
+                    continue
+
+            if not markers:
+                safe_print(f"❌ No markers loaded for {file_info['output_xml']}")
                 continue
 
-            lines = response.text.strip().splitlines()
-            log_debug(f"📄 Downloaded {len(lines)} lines from {file_info['filename']}")
-            markers = []
-
-            for line in lines:
-                marker = parse_line(line, selected_icon)
-                if marker is not None:
-                    icon_name = marker.attrib.get("Icon")
-                    log_debug(f"🔧 Ensuring icon exists: {icon_name}")
-                    ensure_icon_exists(icon_name, mapicons_path, top_font, bottom_font)
-                    markers.append(marker)
+            # Ensure icons exist for all markers
+            for marker in markers:
+                icon_name = marker.attrib.get("Icon")
+                log_debug(f"🔧 Ensuring icon exists: {icon_name}")
+                ensure_icon_exists(icon_name, mapicons_path, top_font, bottom_font)
 
             markers.sort(key=custom_sort)
-            log_debug(f"✅ Parsed and sorted {len(markers)} markers from {file_info['filename']}")
+            log_debug(f"✅ Parsed and sorted {len(markers)} markers ({used_format} format)")
 
             # Write XML
-            pack = ET.Element("Pack", Name=file_info["pack_name"], Revision="0")
+            pack = ET.Element("Pack", Name=pack_name, Revision=str(revision))
             for marker in markers:
                 pack.append(marker)
 
@@ -506,22 +735,22 @@ def update_markers():
             xml_path = client_path / file_info["output_xml"]
             os.makedirs(xml_path.parent, exist_ok=True)
 
-            print(f"💾 Writing {file_info['output_xml']}")
+            safe_print(f"💾 Writing {file_info['output_xml']} ({len(markers)} markers)")
             log_debug(f"💾 Writing XML to: {xml_path}")
             try:
                 with open(xml_path, "wb") as f:
                     f.write(pretty_xml.replace(b"\n", b"\r\n"))
-                print(f"🎉 {file_info['output_xml']} successfully updated.")
+                safe_print(f"🎉 {file_info['output_xml']} successfully updated.")
                 log_debug(f"🎉 {file_info['output_xml']} written successfully.")
             except Exception as e:
-                print(f"❌ Failed to write {file_info['output_xml']}: {e}")
+                safe_print(f"❌ Failed to write {file_info['output_xml']}: {e}")
                 log_debug(f"❌ Failed to write XML {file_info['output_xml']}: {e}")
 
         # === Prompt for gridlines AFTER all standard packs are handled ===
         install_grid = input("📐 Do you want to install gridlines? (y/n): ").strip().lower()
         if install_grid == "y":
             log_debug("🧱 User chose to install gridlines.")
-            print("\n🎨 Choose a gridline color:")
+            safe_print("\n🎨 Choose a gridline color:")
             preset_colors = {
                 "1": ("Light Gray", (180, 180, 180)),
                 "2": ("Cyan", (0, 255, 255)),
@@ -536,7 +765,7 @@ def update_markers():
             }
 
             for key, (label, _) in preset_colors.items():
-                print(f"  [{key}] {label}")
+                safe_print(f"  [{key}] {label}")
 
             color_choice = input("Select a color preset [1–10]: ").strip()
             if color_choice in preset_colors and color_choice != "10":
@@ -548,7 +777,7 @@ def update_markers():
                     if len(base_rgb) != 3:
                         raise ValueError()
                 except Exception:
-                    print("⚠️ Invalid format. Using default light gray.")
+                    safe_print("⚠️ Invalid format. Using default light gray.")
                     base_rgb = (180, 180, 180)
 
             FILL_COLOR = base_rgb + (255,)
@@ -561,14 +790,14 @@ def update_markers():
             if gridline_path.exists():
                 try:
                     os.remove(gridline_path)
-                    print("🧹 Removed existing Gridlines.xml")
+                    safe_print("🧹 Removed existing Gridlines.xml")
                     log_debug("🧹 Removed Gridlines.xml because user chose not to install.")
                 except Exception as e:
-                    print(f"⚠️ Failed to remove Gridlines.xml: {e}")
+                    safe_print(f"⚠️ Failed to remove Gridlines.xml: {e}")
                     log_debug(f"⚠️ Failed to delete Gridlines.xml: {e}")
 
     except Exception as e:
-        print("❌ Error in update_markers()")
+        safe_print("❌ Error in update_markers()")
         log_debug(f"❌ Exception in update_markers(): {e}")
         log_debug(traceback.format_exc())
 
@@ -580,8 +809,9 @@ if __name__ == "__main__":
             with open("marker_debug.log", "w", encoding="utf-8") as log:
                 log.write("=== Debug Log Started ===\n")
 
-        if not is_admin():
-            print("🛡️ Restarting with admin privileges...")
+        # Skip admin check in debug mode for testing
+        if not DEBUG_MODE and not is_admin():
+            safe_print("🛡️ Restarting with admin privileges...")
             if getattr(sys, 'frozen', False):  # Running as bundled EXE
                 exe_path = sys.executable
                 params = ""
@@ -596,7 +826,7 @@ if __name__ == "__main__":
         update_markers()
 
     except Exception as e:
-        print("\n❌ An unexpected error occurred:")
+        safe_print("\n❌ An unexpected error occurred:")
         if DEBUG_MODE:
             log_debug("❌ Unexpected exception occurred:")
             log_debug(traceback.format_exc())  # ✅ this is how to capture the actual traceback
