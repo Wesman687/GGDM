@@ -59,6 +59,8 @@ def get_resource_path(filename):
 TREASURE_COLOR = "#FF33CC"
 DOCKMASTER_COLOR = "#00FFFF"
 HOUSE_COLOR = "#00FF00"  # Green for player houses
+DUNGEON_COLOR = "#FFCC00"  # Ultra bright neon orange for dungeon locations
+FACTION_COLOR = "#FF3333"  # Bright red for faction wayposts
 
 # Constants
 GITHUB_BASE_URL = "https://raw.githubusercontent.com/LeoPiro/GG_Dms/main/"
@@ -94,6 +96,20 @@ MARKER_PACKS = [
         "pack_name": "Player Houses",
         "default_icon": "house"
     },
+    {
+        "yaml_filename": "dung_locs.yaml",
+        "text_filename": None,                      # No legacy text format
+        "output_xml": "Dungeon_Locations.xml",
+        "pack_name": "Dungeon Locations",
+        "default_icon": "dungeon"
+    },
+    {
+        "yaml_filename": "faction_points.yaml",
+        "text_filename": None,                      # No legacy text format
+        "output_xml": "Faction_Wayposts.xml",
+        "pack_name": "Faction Wayposts",
+        "default_icon": "landmark"
+    },
 ]
 
 DEFAULT_INSTALL_PATH = r"C:\\Program Files (x86)\\Ultima Online Outlands"
@@ -121,6 +137,19 @@ def is_treasure_marker(name):
     return re.match(r"^(N|E|S|W|CC|X|A)\d+$", name.upper())
 
 
+def is_faction_marker(name):
+    """
+    Check if a marker name matches faction waypost patterns (F1-F18).
+
+    Args:
+        name: The marker name to check
+
+    Returns:
+        True if the name matches a faction marker pattern
+    """
+    return re.match(r"^F\d+$", name.upper())
+
+
 def is_dockmaster_marker(name):
     name = name.upper()
     return (
@@ -135,6 +164,22 @@ def is_large_marker(name):
     name = name.upper()
     return re.match(r"^M(?:[1-9]|1[0-9]|2[0-9]|30)$", name) is not None
 
+
+def is_dungeon_marker(name):
+    """
+    Check if a marker name matches dungeon location patterns.
+    
+    Matches patterns like: inf1, ssc1, cav1, dm1, pul1, oss1, mau1, aeg1, um1, nus1, kra1, pet1, tt1, etc.
+
+    Args:
+        name: The marker name to check
+
+    Returns:
+        True if the name matches a dungeon marker pattern
+    """
+    # Match 2-3 letters followed by 1-3 digits (e.g., inf1, ssc13, cav32, dm20, pul1, etc.)
+    return re.match(r"^[A-Z]{2,3}\d{1,3}$", name.upper()) is not None
+
 def create_marker_icon(name, output_dir, base_top_font, base_bottom_font):
     try:
         log_debug(f"== Creating icon: {name}")
@@ -146,6 +191,8 @@ def create_marker_icon(name, output_dir, base_top_font, base_bottom_font):
             color = TREASURE_COLOR
         elif is_dockmaster_marker(name):
             color = DOCKMASTER_COLOR
+        elif is_faction_marker(name):
+            color = FACTION_COLOR
         else:
             color = "gray"
 
@@ -244,6 +291,64 @@ def create_house_icon(output_dir, icon_name="house", color=HOUSE_COLOR, size=8):
 
     except Exception as e:
         log_debug(f"❌ Failed to create house icon: {e}")
+        log_debug(traceback.format_exc())
+
+
+def create_dungeon_icon(name, output_dir, base_top_font, base_bottom_font):
+    """
+    Create a smaller dungeon location icon (64% size of normal markers).
+    Only displays the number part of the name (e.g., "pul19" shows as "19").
+
+    Args:
+        name: The dungeon marker name (e.g., "inf1", "ssc1", "cav1", etc.)
+        output_dir: Directory to save the icon
+        base_top_font: Base font for top text
+        base_bottom_font: Base font for bottom text
+    """
+    try:
+        log_debug(f"== Creating dungeon icon: {name}")
+        log_debug(f"Output folder: {output_dir}")
+
+        # Extract only the number part
+        top_text, number_text = split_name(name)
+        color = DUNGEON_COLOR
+
+        # 64% of normal icon size (54 -> 34)
+        icon_size = 34
+        canvas_size = 34
+
+        # Use a larger font since we're only displaying the number
+        try:
+            number_font = ImageFont.truetype(base_top_font.path, int(base_top_font.size * 0.75))
+        except Exception:
+            number_font = base_top_font
+
+        # Create canvas
+        canvas = Image.new("RGBA", (canvas_size, canvas_size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+
+        # Center the number vertically and horizontally
+        number_bbox = draw.textbbox((0, 0), number_text, font=number_font)
+        number_width = number_bbox[2] - number_bbox[0]
+        number_height = number_bbox[3] - number_bbox[1]
+        number_x = (icon_size - number_width) // 2
+        number_y = (icon_size - number_height) // 2
+
+        # Draw text with shadow
+        for x_off in [-1, 0, 1]:
+            for y_off in [-1, 0, 1]:
+                if x_off or y_off:
+                    draw.text((number_x + x_off, number_y + y_off), number_text, font=number_font, fill="black")
+
+        draw.text((number_x, number_y), number_text, font=number_font, fill=color)
+
+        os.makedirs(output_dir, exist_ok=True)
+        output_file = os.path.join(output_dir, f"{name}.png")
+        canvas.save(output_file)
+        log_debug(f"✅ Saved dungeon icon to: {output_file}")
+
+    except Exception as e:
+        log_debug(f"❌ Failed to create dungeon icon for {name}: {e}")
         log_debug(traceback.format_exc())
 
 
@@ -470,7 +575,7 @@ def parse_yaml_markers(yaml_content, default_icon, default_facet=0):
 
     # Support multiple root keys for flexibility
     marker_data = {}
-    for key in ["dockmasters", "markers", "houses", "locations", "treasures"]:
+    for key in ["dockmasters", "markers", "houses", "locations", "treasures", "dungeon_locations"]:
         if key in data and data[key]:
             marker_data = data[key]
             log_debug(f"📋 Using '{key}' as marker root key")
@@ -503,7 +608,7 @@ def parse_yaml_markers(yaml_content, default_icon, default_facet=0):
             continue
 
         # Determine icon name
-        if is_treasure_marker(name) or is_dockmaster_marker(name):
+        if is_treasure_marker(name) or is_dockmaster_marker(name) or is_dungeon_marker(name) or is_faction_marker(name):
             icon = name
         else:
             icon = attributes.get("icon", default_icon)
@@ -533,8 +638,10 @@ def ensure_icon_exists(icon_name, output_folder, top_font, bottom_font):
         top_font: Font for top text
         bottom_font: Font for bottom text
     """
-    if is_treasure_marker(icon_name) or is_dockmaster_marker(icon_name):
+    if is_treasure_marker(icon_name) or is_dockmaster_marker(icon_name) or is_faction_marker(icon_name):
         create_marker_icon(icon_name, output_folder, top_font, bottom_font)
+    elif is_dungeon_marker(icon_name):
+        create_dungeon_icon(icon_name, output_folder, top_font, bottom_font)
     elif icon_name == "house":
         create_house_icon(output_folder, icon_name, HOUSE_COLOR, size=8)
             
